@@ -1,0 +1,90 @@
+version: 0.2
+
+phases:
+  install:
+    runtime-versions:
+      nodejs: 16
+      python: 3.9
+    commands:
+      # Install dependencies for static analysis
+      - npm install -g eslint
+      - pip install flake8 bandit
+      - apt-get update && apt-get install -y jq
+      # Install Docker Compose
+      - curl -L "https://github.com/docker/compose/releases/download/1.29.2/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
+      - chmod +x /usr/local/bin/docker-compose
+
+  pre_build:
+    commands:
+      - echo Starting static code analysis
+      
+      # Frontend analysis
+      - echo "Analyzing frontend code..."
+      - cd frontend
+      - if [ -f "package.json" ]; then npm install; fi
+      - eslint src/ || echo "ESLint found issues"
+      - cd ..
+      
+      # Backend analysis
+      - echo "Analyzing backend code..."
+      - cd backend
+      - if [ -f "package.json" ]; then npm install; fi
+      - eslint src/ || echo "ESLint found issues"
+      - cd ..
+      
+      # Security scan with Bandit (if any Python code exists)
+      - echo "Running security scan..."
+      - find . -name "*.py" -exec bandit -r {} \; || echo "Bandit found security issues"
+      
+      # Docker Compose validation
+      - echo "Validating Docker Compose file..."
+      - docker-compose config
+      
+  build:
+    commands:
+      - echo Build started on `date`
+      - echo Building Docker images...
+      - docker-compose build
+      
+      # Test if images can be started
+      - echo "Testing Docker Compose services..."
+      - docker-compose up -d
+      - sleep 10
+      - docker-compose ps
+      - docker-compose logs
+      - docker-compose down
+      
+  post_build:
+    commands:
+      - echo Build completed on `date`
+      # Save test results and logs
+      - mkdir -p test-results
+      - docker-compose logs > test-results/docker-compose-logs.txt
+      
+      # Check if any services failed to start
+      - |
+        if [ $(docker-compose ps -q | wc -l) -eq 3 ]; then
+          echo "All services started successfully"
+        else
+          echo "Some services failed to start"
+          exit 1
+        fi
+
+artifacts:
+  files:
+    - docker-compose.yml
+    - frontend/**/*
+    - backend/**/*
+    - test-results/**/*
+  discard-paths: no
+
+cache:
+  paths:
+    - 'frontend/node_modules/**/*'
+    - 'backend/node_modules/**/*'
+
+reports:
+  static-analysis:
+    files:
+      - "test-results/**/*"
+    file-format: "CucumberJson"
