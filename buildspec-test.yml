@@ -1,0 +1,54 @@
+version: 0.2
+
+phases:
+  install:
+    runtime-versions:
+      nodejs: 18
+    commands:
+      - npm install -g npm@latest
+  
+  pre_build:
+    commands:
+      - echo Installing frontend dependencies...
+      - cd frontend
+      - npm install
+      - echo Installing backend dependencies...
+      - cd ../backend
+      - npm install
+      - cd ..
+  
+  build:
+    commands:
+      - echo Running frontend tests...
+      - cd frontend
+      - npm test -- --watchAll=false --ci --coverage
+      - echo Frontend tests completed
+      - cd ../backend
+      - echo Running backend tests...
+      - npm test
+      - echo Backend tests completed
+      - cd ..
+
+  post_build:
+    commands:
+      - echo Running container health checks...
+      - docker-compose up -d
+      - sleep 10  # Wait for containers to be ready
+      - curl -f http://localhost:3000 || exit 1  # Frontend health check
+      - curl -f http://localhost:5000/api/health || exit 1  # Backend health check
+      - docker-compose down
+      - echo All tests completed on `date`
+
+artifacts:
+  files:
+    - appspec.yml
+    - docker-compose.yml
+    - scripts/**/*
+    - frontend/**/*
+    - backend/**/*
+  discard-paths: no
+
+cache:
+  paths:
+    - frontend/node_modules/**/*
+    - backend/node_modules/**/*
