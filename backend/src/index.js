@@ -5,14 +5,33 @@ const bodyParser = require('body-parser');
 const app = express();
 const port = process.env.PORT || 5000;
 
-// Database configuration
+// Database configuration with retries and timeout
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
+  connectionTimeoutMillis: 5000,
+  retryDelay: 2000,
+  max: 20,
+  idleTimeoutMillis: 30000,
+  connectionTimeoutMillis: 2000
 });
+
+// Test database connection before starting server
+async function testDbConnection() {
+  try {
+    const client = await pool.connect();
+    const result = await client.query('SELECT NOW()');
+    console.log('Database connection successful:', result.rows[0]);
+    client.release();
+    return true;
+  } catch (err) {
+    console.error('Database connection error:', err);
+    return false;
+  }
+}
 
 // CORS configuration
 app.use(cors({
-  origin: true, // This allows any origin
+  origin: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
   credentials: true
@@ -20,9 +39,34 @@ app.use(cors({
 
 app.use(bodyParser.json());
 
-// Health check endpoint
+// Simple health check endpoint without DB check for container health checks
 app.get('/api/health', (req, res) => {
-  res.status(200).json({ status: 'healthy' });
+  res.status(200).json({ status: 'healthy', message: 'Server is running' });
+});
+
+// Detailed health check endpoint
+app.get('/api/health/detailed', async (req, res) => {
+  try {
+    const dbHealthy = await testDbConnection();
+    if (!dbHealthy) {
+      return res.status(500).json({ 
+        status: 'unhealthy', 
+        message: 'Database connection failed',
+        timestamp: new Date().toISOString()
+      });
+    }
+    res.status(200).json({ 
+      status: 'healthy', 
+      message: 'All systems operational',
+      timestamp: new Date().toISOString()
+    });
+  } catch (err) {
+    res.status(500).json({ 
+      status: 'unhealthy', 
+      message: err.message,
+      timestamp: new Date().toISOString()
+    });
+  }
 });
 
 // Get all posts
@@ -96,6 +140,30 @@ app.use((err, req, res, next) => {
   res.status(500).json({ error: 'Something broke!' });
 });
 
-app.listen(port, '0.0.0.0', () => {
-  console.log(`Server running on port ${port}`);
+// Start server only after testing database connection
+async function startServer() {
+  try {
+    console.log('Starting server initialization...');
+    app.listen(port, '0.0.0.0', () => {
+      console.log(`Server running on port ${port}`);
+    });
+
+    // Test database connection after server is running
+    const dbHealthy = await testDbConnection();
+    if (!dbHealthy) {
+      console.error('Could not establish database connection. Server will continue running but database operations will fail.');
+    }
+  } catch (err) {
+    console.error('Server startup error:', err);
+    process.exit(1);
+  }
+}
+
+// Handle process termination
+process.on('SIGTERM', async () => {
+  console.info('SIGTERM signal received.');
+  await pool.end();
+  process.exit(0);
 });
+
+startServer();
