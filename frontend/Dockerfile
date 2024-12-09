@@ -1,5 +1,8 @@
 FROM node:18-alpine
 
+# Install wget for health checks
+RUN apk add --no-cache wget
+
 WORKDIR /app
 
 # Copy package files
@@ -19,7 +22,9 @@ ENV PATH /app/node_modules/.bin:$PATH
 
 # Set development environment
 ENV NODE_ENV=development
+ENV WDS_SOCKET_PORT=0
 
+# Expose port
 EXPOSE 3000
 
 # Start the application
