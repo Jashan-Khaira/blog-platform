@@ -6,18 +6,13 @@ phases:
       nodejs: 18
     commands:
       - npm install -g npm@latest
-      # Install Docker in Ubuntu
-      - apt-get update
-      - apt-get install -y apt-transport-https ca-certificates curl software-properties-common
-      - curl -fsSL https://download.docker.com/linux/ubuntu/gpg | apt-key add -
-      - add-apt-repository "deb [arch=amd64] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable"
-      - apt-get update
-      - apt-get install -y docker-ce docker-ce-cli containerd.io
-      # Install Docker Compose
+      # Docker should already be installed in CodeBuild when using privileged mode
+      # Just install Docker Compose
       - curl -L "https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
       - chmod +x /usr/local/bin/docker-compose
-      # Start Docker service
-      - service docker start
+      # Verify Docker is working
+      - docker --version
+      - docker-compose --version
   
   pre_build:
     commands:
@@ -43,7 +38,7 @@ phases:
       - echo "Running frontend tests..."
       - |
         cat << EOF > src/App.test.js
-        import { render, screen } from '@testing-library/react';
+        import { render } from '@testing-library/react';
         import App from './App';
         
         test('renders without crashing', () => {
@@ -71,22 +66,20 @@ phases:
         DB_USER=postgres
         DB_PASSWORD=postgres
         EOF
-      # Start only the database first
-      - docker-compose up -d db
-      - sleep 10
-      # Start backend with dependency check
-      - docker-compose up -d backend
-      - sleep 15
-      # Start frontend
-      - docker-compose up -d frontend
-      - sleep 10
+      # Verify Docker status
+      - docker ps
+      # Start containers
+      - docker-compose up -d
+      - sleep 20
+      # Show container status
+      - docker-compose ps
+      - docker-compose logs
       # Health checks
       - echo "Checking backend health..."
       - curl --retry 5 --retry-delay 5 http://localhost:5000/api/health || echo "Backend health check failed but continuing..."
       - echo "Checking frontend availability..."
       - curl --retry 5 --retry-delay 5 http://localhost:3000 || echo "Frontend health check failed but continuing..."
       - echo "Tests and health checks completed"
-      - docker-compose logs
       - docker-compose down
 
 artifacts:
